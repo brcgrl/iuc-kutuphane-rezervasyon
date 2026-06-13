@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>İÜC Kütüphane Rezervasyon Sistemi</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header class="site-header">
+        <div class="container header-inner">
+            <div class="brand">
+                <div class="logo-wrap">
+                    <img src="iuc-logo.png" alt="İÜC logosu"
+                        onerror="this.style.display='none'; document.getElementById('fallbackLogo').style.display='grid';">
+                    <span id="fallbackLogo" class="fallback-logo">İÜC</span>
+                </div>
+
+                <div>
+                    <strong>İÜC Kütüphaneleri</strong>
+                    <span>Rezervasyon Sistemi</span>
+                </div>
+            </div>
+
+            <div class="header-actions">
+                <button id="landingLoginButton" class="button ghost-button">Giriş Yap</button>
+
+                <div id="signedInActions" class="signed-in-actions hidden">
+                    <span id="headerUserName" class="header-user-name"></span>
+                    <button id="logoutButton" class="button ghost-button">Çıkış Yap</button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main>
+        <!-- SADE KARŞILAMA EKRANI -->
+        <section id="landingView" class="view active">
+            <div class="landing-hero">
+                <div class="container hero-grid">
+                    <div class="hero-copy">
+                        <span class="eyebrow">İSTANBUL ÜNİVERSİTESİ-CERRAHPAŞA</span>
+                        <h1>Kütüphanedeki çalışma alanını kolayca ayır.</h1>
+                        <p>
+                            Güncel doluluk oranını görüntüle, hesabına giriş yap
+                            ve uygun koltuğu krokiden seçerek rezervasyonunu oluştur.
+                        </p>
+
+                        <button id="startReservationButton" class="button primary-button hero-button">
+                            Rezervasyon Oluştur
+                        </button>
+                    </div>
+
+                    <div class="hero-visual" aria-hidden="true">
+                        <div class="visual-glow glow-one"></div>
+                        <div class="visual-glow glow-two"></div>
+
+                        <div class="library-preview-card">
+                            <div class="preview-top-row">
+                                <span class="preview-badge">Canlı Doluluk</span>
+                                <span class="preview-status"><i></i> Açık</span>
+                            </div>
+
+                            <div class="preview-title">
+                                <h3>Sessiz Çalışma Alanı</h3>
+                                <p>Canlı doluluk oranı</p>
+                            </div>
+
+                            <div class="preview-dots">
+                                <span class="dot available"></span>
+                                <span class="dot available"></span>
+                                <span class="dot occupied"></span>
+                                <span class="dot available"></span>
+                                <span class="dot occupied"></span>
+                                <span class="dot available"></span>
+                                <span class="dot available"></span>
+                                <span class="dot occupied"></span>
+                                <span class="dot available"></span>
+                                <span class="dot available"></span>
+                                <span class="dot occupied"></span>
+                                <span class="dot available"></span>
+                            </div>
+
+                            <div class="preview-footer">
+                                <span><i class="mini-dot available"></i> Boş koltuk</span>
+                                <span><i class="mini-dot occupied"></i> Dolu koltuk</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="container landing-content">
+                <section class="occupancy-section">
+                    <div class="section-heading">
+                        <div>
+                            <span class="eyebrow">GÜNCEL DURUM</span>
+                            <h2>Kütüphane doluluk tablosu</h2>
+                            <p>Rezervasyon oluşturmadan önce mevcut sandalye durumunu inceleyebilirsin.</p>
+                        </div>
+
+                        <button id="tableReservationButton" class="button primary-button">
+                            Rezervasyon Oluştur
+                        </button>
+                    </div>
+
+                    <div class="occupancy-showcase">
+                        <div class="occupancy-card">
+                            <div class="table-responsive">
+                                <table class="occupancy-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Alan</th>
+                                            <th>Toplam Sandalye</th>
+                                            <th>Boş Sandalye</th>
+                                            <th>Dolu Sandalye</th>
+                                            <th>Doluluk Oranı</th>
+                                            <th>Durum</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="landingOccupancyTable"></tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <aside class="capacity-visual-card">
+                            <div>
+                                <span class="capacity-kicker">TOPLAM KAPASİTE</span>
+                                <h3>Canlı Doluluk</h3>
+                            </div>
+
+                            <div class="capacity-main">
+                                <div class="capacity-copy">
+                                    <p><span>Doluluk</span><strong id="capacityRateText">%0</strong></p>
+                                    <p><span>Kapasite</span><strong id="capacityTotalText">0</strong></p>
+                                    <p><span>Boş Yer</span><strong id="capacityAvailableText">0</strong></p>
+                                </div>
+
+                                <div class="semi-gauge">
+                                    <div class="semi-gauge-fill" id="semiGaugeFill"></div>
+                                    <div class="semi-gauge-cover"></div>
+                                    <strong id="semiGaugeText">%0</strong>
+                                </div>
+                            </div>
+
+                            <div class="capacity-footer">
+                                <span><i class="capacity-dot blue"></i> Boş</span>
+                                <span><i class="capacity-dot red"></i> Dolu</span>
+                            </div>
+                        </aside>
+                    </div>
+                </section>
+
+                <section class="landing-info-grid">
+                    <article class="info-card">
+                        <div class="info-icon">01</div>
+                        <h3>Hesabına giriş yap</h3>
+                        <p>Rezervasyon butonuna bastığında kayıt veya giriş ekranına yönlendirilirsin.</p>
+                    </article>
+
+                    <article class="info-card">
+                        <div class="info-icon">02</div>
+                        <h3>Koltuk seçimini yap</h3>
+                        <p>Kütüphanenin tek katlı krokisi üzerinden uygun masayı ve koltuğu seç.</p>
+                    </article>
+
+                    <article class="info-card">
+                        <div class="info-icon">03</div>
+                        <h3>Katılımını doğrula</h3>
+                        <p>Kütüphaneye geldiğinde konum izniyle rezervasyona katılımını doğrula.</p>
+                    </article>
+                </section>
+            </div>
+        </section>
+
+        <!-- GİRİŞ / KAYIT EKRANI -->
+        <section id="authView" class="view">
+            <div class="auth-page">
+                <div class="auth-left">
+                    <button id="backToLandingButton" class="back-link">← Ana sayfaya dön</button>
+
+                    <span class="eyebrow">İÜC KÜTÜPHANELERİ</span>
+                    <h2>Rezervasyonuna devam etmek için hesabına giriş yap.</h2>
+                    <p>
+                        Yeni kullanıcıysan saniyeler içinde öğrenci hesabı oluşturabilir,
+                        daha sonra rezervasyon paneline geçebilirsin.
+                    </p>
+
+                    <div class="auth-feature-list">
+                        <span>✓ Koltuk seçimi</span>
+                        <span>✓ Rezervasyon geçmişi</span>
+                        <span>✓ Profil bilgileri</span>
+                        <span>✓ Konum doğrulaması</span>
+                    </div>
+                </div>
+
+                <div class="auth-card">
+                    <div class="auth-tabs">
+                        <button id="showLoginTab" class="auth-tab active">Giriş Yap</button>
+                        <button id="showRegisterTab" class="auth-tab">Hesap Oluştur</button>
+                    </div>
+
+                    <form id="loginForm" class="auth-form">
+                        <h3>Tekrar hoş geldin</h3>
+                        <p>Öğrenci hesabınla giriş yap.</p>
+
+                        <label for="loginEmail">Öğrenci e-postası</label>
+                        <input id="loginEmail" type="email" placeholder="ornek@ogr.iuc.edu.tr" required>
+
+                        <label for="loginPassword">Şifre</label>
+                        <input id="loginPassword" type="password" placeholder="Şifreni yaz" required>
+
+                        <button class="button primary-button full-width" type="submit">Giriş Yap</button>
+
+                        <button id="forgotPasswordButton" type="button" class="text-link">
+                            Şifremi unuttum
+                        </button>
+                    </form>
+
+                    <form id="registerForm" class="auth-form hidden">
+                        <h3>Yeni hesap oluştur</h3>
+                        <p>Rezervasyon yapabilmek için bilgilerini gir.</p>
+
+                        <label for="registerName">Ad soyad</label>
+                        <input id="registerName" type="text" placeholder="Adını ve soyadını yaz" required>
+
+                        <label for="registerStudentNo">Öğrenci numarası</label>
+                        <input id="registerStudentNo" type="text" placeholder="Öğrenci numaranı yaz" required>
+
+                        <label for="registerEmail">Öğrenci e-postası</label>
+                        <input id="registerEmail" type="email" placeholder="ornek@ogr.iuc.edu.tr" required>
+
+                        <label for="registerPassword">Şifre</label>
+                        <input id="registerPassword" type="password" minlength="4" placeholder="En az 4 karakter" required>
+
+                        <button class="button primary-button full-width" type="submit">Hesabımı Oluştur</button>
+                    </form>
+                </div>
+            </div>
+        </section>
+
+        <!-- GİRİŞ SONRASI MODERN PANEL -->
+        <section id="dashboardView" class="view">
+            <div class="dashboard-layout">
+                <aside class="sidebar">
+                    <div class="sidebar-brand">
+                        <div class="sidebar-logo">
+                            <img src="iuc-logo.png" alt="İÜC logosu"
+                                onerror="this.style.display='none'; this.parentElement.textContent='İÜC';">
+                        </div>
+                        <div>
+                            <strong>İÜC Kütüphane</strong>
+                            <span>Öğrenci paneli</span>
+                        </div>
+                    </div>
+
+                    <nav class="sidebar-nav">
+                        <button class="sidebar-link active" data-panel="libraryPanel">
+                            <span>⌂</span> Kütüphane Durumu
+                        </button>
+
+                        <button class="sidebar-link" data-panel="reservationsPanel">
+                            <span>◷</span> Rezervasyonlarım
+                        </button>
+
+                        <button class="sidebar-link" data-panel="profilePanel">
+                            <span>◎</span> Profil Bilgileri
+                        </button>
+
+                        <button class="sidebar-link" data-panel="levelsPanel">
+                            <span>✦</span> Seviyeler
+                        </button>
+                    </nav>
+
+                    <div class="sidebar-bottom">
+                        <p>İÜC Kütüphaneleri</p>
+                        <small>Rezervasyon sistemi prototipi</small>
+                    </div>
+                </aside>
+
+                <div class="dashboard-main">
+                    <header class="dashboard-header">
+                        <div>
+                            <span class="eyebrow">ÖĞRENCİ PANELİ</span>
+                            <h2 id="dashboardTitle">Kütüphane Durumu</h2>
+                        </div>
+
+                        <div class="dashboard-user">
+                            <div class="dashboard-avatar">👤</div>
+                            <div>
+                                <strong id="dashboardUserName">Öğrenci</strong>
+                                <span id="dashboardUserEmail">ogrenci@iuc.edu.tr</span>
+                            </div>
+                        </div>
+                    </header>
+
+                    <div class="dashboard-content">
+                        <!-- KÜTÜPHANE DURUMU -->
+                        <section id="libraryPanel" class="dashboard-panel active">
+                            <div class="dashboard-cards">
+                                <article class="metric-card">
+                                    <div class="metric-icon blue">▦</div>
+                                    <div>
+                                        <span>Toplam Sandalye</span>
+                                        <strong id="metricTotalSeats">0</strong>
+                                    </div>
+                                </article>
+
+                                <article class="metric-card">
+                                    <div class="metric-icon green">✓</div>
+                                    <div>
+                                        <span>Boş Sandalye</span>
+                                        <strong id="metricAvailableSeats">0</strong>
+                                    </div>
+                                </article>
+
+                                <article class="metric-card">
+                                    <div class="metric-icon coral">●</div>
+                                    <div>
+                                        <span>Dolu Sandalye</span>
+                                        <strong id="metricOccupiedSeats">0</strong>
+                                    </div>
+                                </article>
+
+                                <article class="metric-card">
+                                    <div class="metric-icon purple">%</div>
+                                    <div>
+                                        <span>Doluluk Oranı</span>
+                                        <strong id="metricOccupancyRate">%0</strong>
+                                    </div>
+                                </article>
+                            </div>
+
+                            <section id="reservationAccessBanner" class="reservation-access-banner">
+                                <div>
+                                    <span class="eyebrow">GÜNLÜK REZERVASYON HAKKI</span>
+                                    <h3 id="dailyQuotaTitle">Bugün 0 / 4 seans kullandın</h3>
+                                    <p id="dailyQuotaText">Aynı gün içerisinde en fazla 4 seans rezervasyonu oluşturabilirsin.</p>
+                                </div>
+
+                                <div id="dailyQuotaDots" class="quota-dots"></div>
+                            </section>
+
+                            <section class="dashboard-card">
+                                <div class="card-heading">
+                                    <div>
+                                        <span class="eyebrow">REZERVASYON OLUŞTUR</span>
+                                        <h3>Kütüphane krokisi</h3>
+                                        <p>Tarih ve saat seçtikten sonra yeşil koltuklardan birine tıkla.</p>
+                                    </div>
+
+                                    <div class="map-legend">
+                                        <span><i class="legend-dot available"></i> Boş</span>
+                                        <span><i class="legend-dot selected"></i> Seçili</span>
+                                        <span><i class="legend-dot occupied"></i> Dolu</span>
+                                        <span><i class="legend-dot computer"></i> Bilgisayarlı</span>
+                                    </div>
+                                </div>
+
+                                <div class="reservation-toolbar">
+                                    <div>
+                                        <label for="reservationDate">Tarih</label>
+                                        <input id="reservationDate" type="date">
+                                    </div>
+
+                                    <div>
+                                        <label for="reservationTime">Saat aralığı</label>
+                                        <select id="reservationTime">
+                                            <option value="">Saat aralığı seç</option>
+                                            <option value="09:00 - 11:00">09:00 - 11:00</option>
+                                            <option value="11:00 - 13:00">11:00 - 13:00</option>
+                                            <option value="13:00 - 15:00">13:00 - 15:00</option>
+                                            <option value="15:00 - 17:00">15:00 - 17:00</option>
+                                            <option value="17:00 - 19:00">17:00 - 19:00</option>
+                                            <option value="19:00 - 21:00">19:00 - 21:00</option>
+                                        </select>
+                                    </div>
+
+                                    <div class="selected-seat-box">
+                                        <span>Seçilen koltuk</span>
+                                        <strong id="selectedSeatText">Henüz seçilmedi</strong>
+                                    </div>
+
+                                    <button id="createReservationButton" class="button primary-button" disabled>
+                                        Rezervasyon Oluştur
+                                    </button>
+                                </div>
+
+                                <div class="map-scroll">
+                                    <div id="floorPlan" class="floor-plan">
+                                        <div class="floor-plan-header">
+                                            <strong>İÜC Kütüphane · Sessiz Çalışma Salonu</strong>
+                                            <span>Tek kat</span>
+                                        </div>
+
+                                        <div class="quiet-zone">SESSİZ ÇALIŞMA ALANI</div>
+                                        <div class="entrance">GİRİŞ / ÇIKIŞ <span>↗</span></div>
+                                    </div>
+                                </div>
+                            </section>
+                        </section>
+
+                        <!-- REZERVASYONLARIM -->
+                        <section id="reservationsPanel" class="dashboard-panel">
+                            <div class="panel-grid">
+                                <section class="dashboard-card">
+                                    <div class="card-heading">
+                                        <div>
+                                            <span class="eyebrow">AKTİF REZERVASYON</span>
+                                            <h3>Yaklaşan rezervasyonların</h3>
+                                        </div>
+                                    </div>
+
+                                    <div id="activeReservationArea"></div>
+                                </section>
+
+                                <section class="dashboard-card">
+                                    <div class="card-heading">
+                                        <div>
+                                            <span class="eyebrow">KONUM DOĞRULAMASI</span>
+                                            <h3>Katılım kontrolü</h3>
+                                        </div>
+                                    </div>
+
+                                    <div class="location-area">
+                                        <p id="locationStatusText">
+                                            Katılımını doğrulamak istediğin rezervasyonu seç ve konum kontrolünü başlat.
+                                        </p>
+
+                                        <label for="attendanceReservationSelect">Doğrulanacak seans</label>
+                                        <select id="attendanceReservationSelect">
+                                            <option value="">Rezervasyon seç</option>
+                                        </select>
+
+                                        <button id="startLocationButton" class="button primary-button full-width">
+                                            Konum Kontrolünü Başlat
+                                        </button>
+
+                                        <button id="demoLocationButton" class="button secondary-button full-width">
+                                            Demo: Kütüphanedeymişim Gibi Test Et
+                                        </button>
+
+                                        <small>Gerçek kullanımda tarayıcı senden konum izni ister.</small>
+                                    </div>
+                                </section>
+                            </div>
+
+                            <section class="dashboard-card">
+                                <div class="card-heading">
+                                    <div>
+                                        <span class="eyebrow">GEÇMİŞ</span>
+                                        <h3>Rezervasyon geçmişi</h3>
+                                    </div>
+                                </div>
+
+                                <div id="reservationHistoryArea"></div>
+                            </section>
+                        </section>
+
+                        <!-- PROFİL -->
+                        <section id="profilePanel" class="dashboard-panel">
+                            <div class="profile-clean-grid">
+                                <section class="dashboard-card profile-summary-card">
+                                    <div class="large-avatar">👤</div>
+                                    <h3 id="profileName">Öğrenci</h3>
+                                    <p id="profileEmail">ogrenci@iuc.edu.tr</p>
+
+                                    <span id="profileLevelMiniBadge" class="level-badge">Çaylak Kütüphaneci</span>
+
+                                    <button class="button secondary-button profile-level-button" data-open-levels>
+                                        Seviye Detaylarını Gör
+                                    </button>
+                                </section>
+
+                                <section class="dashboard-card">
+                                    <div class="card-heading">
+                                        <div>
+                                            <span class="eyebrow">HESAP BİLGİLERİ</span>
+                                            <h3>Profil detayları</h3>
+                                        </div>
+                                    </div>
+
+                                    <div id="profileDetails" class="profile-details"></div>
+                                    <div id="penaltyInfoBox" class="penalty-info-box"></div>
+                                </section>
+
+                                <section class="dashboard-card">
+                                    <div class="card-heading">
+                                        <div>
+                                            <span class="eyebrow">ROZETLER</span>
+                                            <h3>Kütüphane başarıları</h3>
+                                        </div>
+                                    </div>
+
+                                    <div id="badgeArea" class="badge-grid"></div>
+                                </section>
+                            </div>
+                        </section>
+
+                        <!-- SEVİYELER -->
+                        <section id="levelsPanel" class="dashboard-panel">
+                            <div class="levels-hero-card">
+                                <div class="levels-hero-left">
+                                    <span class="eyebrow gold-eyebrow">MEVCUT SEVİYEN</span>
+
+                                    <div class="current-level-line">
+                                        <div id="levelHeroIcon" class="level-hero-icon">📚</div>
+
+                                        <div>
+                                            <p class="level-number-label">Kütüphaneci Seviyesi</p>
+                                            <h3 id="levelHeroName">Çaylak Kütüphaneci</h3>
+                                            <p id="levelHeroMessage">İlk katılımını doğrulayarak seviyeni yükseltmeye başla.</p>
+                                        </div>
+                                    </div>
+
+                                    <div class="level-xp-row">
+                                        <div>
+                                            <span>Toplam Puan</span>
+                                            <strong id="levelTotalPoints">0 XP</strong>
+                                        </div>
+
+                                        <div>
+                                            <span>Doğrulanan Katılım</span>
+                                            <strong id="levelAttendanceCount">0</strong>
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="levels-hero-right">
+                                    <div class="next-level-card">
+                                        <span>SONRAKİ SEVİYE</span>
+                                        <strong id="nextLevelName">Raf Kaşifi</strong>
+
+                                        <div class="level-main-progress-track">
+                                            <div id="levelMainProgressBar" class="level-main-progress-bar"></div>
+                                        </div>
+
+                                        <p id="levelMainProgressText">0 / 20 puan</p>
+                                        <small id="levelNextHint">Raf Kaşifi seviyesine 20 puan kaldı.</small>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="levels-dashboard-grid">
+                                <section class="dashboard-card streak-card">
+                                    <div class="streak-icon">🔥</div>
+                                    <span class="eyebrow">ÇALIŞMA SERİSİ</span>
+                                    <h3><span id="streakCount">0</span> günlük seri</h3>
+                                    <p>Art arda katılım doğruladıkça serini büyüt.</p>
+                                    <div id="streakWeek" class="streak-week"></div>
+                                </section>
+
+                                <section class="dashboard-card rank-card">
+                                    <div class="rank-header">
+                                        <div>
+                                            <span class="eyebrow">KÜTÜPHANE RANKI</span>
+                                            <h3 id="rankTitle">Bronz Raf</h3>
+                                        </div>
+
+                                        <div id="rankIcon" class="rank-icon">🥉</div>
+                                    </div>
+
+                                    <p id="rankMessage">İlk katılımınla sıralamada yükselmeye başla.</p>
+
+                                    <div class="rank-progress-track">
+                                        <div id="rankProgressBar" class="rank-progress-bar"></div>
+                                    </div>
+
+                                    <small id="rankProgressText"></small>
+                                </section>
+                            </div>
+
+                            <section class="dashboard-card levels-roadmap-card">
+                                <div class="card-heading">
+                                    <div>
+                                        <span class="eyebrow">SEVİYE YOLCULUĞU</span>
+                                        <h3>Kütüphaneci seviye basamakları</h3>
+                                        <p>Katılım doğruladıkça puan kazanır ve yeni seviyelerin kilidini açarsın.</p>
+                                    </div>
+                                </div>
+
+                                <div id="levelJourney" class="level-journey"></div>
+                            </section>
+
+                            <section class="dashboard-card leaderboard-card">
+                                <div class="leaderboard-heading">
+                                    <div>
+                                        <span class="eyebrow">AYLIK SIRALAMA</span>
+                                        <h3>Kütüphane liderlik tablosu</h3>
+                                        <p>Bu ay doğrulanan katılımlardan kazandığın puanlarla diğer öğrencilerle sıralanırsın.</p>
+                                    </div>
+
+                                    <div class="monthly-rank-highlight">
+                                        <span>Bu ayki sıran</span>
+                                        <strong id="monthlyRankText">#-</strong>
+                                    </div>
+                                </div>
+
+                                <div class="leaderboard-summary">
+                                    <div>
+                                        <span>Aylık puanın</span>
+                                        <strong id="monthlyPointsText">0 XP</strong>
+                                    </div>
+
+                                    <div>
+                                        <span>Toplam katılımcı</span>
+                                        <strong id="leaderboardParticipantCount">0</strong>
+                                    </div>
+
+                                    <div>
+                                        <span>İlk 3'e kalan puan</span>
+                                        <strong id="pointsToTopThree">0 XP</strong>
+                                    </div>
+                                </div>
+
+                                <div id="leaderboardTable" class="leaderboard-table"></div>
+
+                                <p class="leaderboard-note">
+                                    Prototipte diğer öğrenciler örnek verilerle gösterilir. Gerçek sistemde sıralama ortak veri tabanından canlı olarak hesaplanır.
+                                </p>
+                            </section>
+
+                            <section class="dashboard-card rank-list-card">
+                                <div class="card-heading">
+                                    <div>
+                                        <span class="eyebrow">RANK YOLCULUĞU</span>
+                                        <h3>Rank basamakları</h3>
+                                    </div>
+                                </div>
+
+                                <div id="rankJourney" class="rank-journey"></div>
+                            </section>
+                        </section>
+
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- KURALLAR MODALI -->
+    <div id="rulesModal" class="modal">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>Rezervasyon Onay Metni</h3>
+                <button id="closeRulesModalButton" class="modal-close">×</button>
+            </div>
+
+            <div class="modal-body">
+                <h4>Rezervasyon kuralları</h4>
+
+                <ol>
+                    <li>Rezervasyonlar iki saatlik seanslar halinde oluşturulur.</li>
+                    <li>Aynı anda yalnızca bir aktif rezervasyona sahip olabilirsin.</li>
+                    <li>Rezervasyona katılamayacaksan iptal işlemi yapmalısın.</li>
+                    <li>Boş koltuklar yeşil, dolu koltuklar gri renkte gösterilir.</li>
+                    <li>Kütüphaneye geldiğinde açık izninle konum doğrulaması yapabilirsin.</li>
+                    <li>Katılımı doğrulanmadan süresi geçen bir seans için 10 puan ceza uygulanır ve 2 gün boyunca yeni rezervasyon oluşturulamaz.</li>
+                    <li>Aynı gün içerisinde en fazla 4 seans rezerve edebilirsin.</li>
+                    <li>Kütüphane sessizlik kurallarına uymalısın.</li>
+                </ol>
+
+                <label class="approval-row">
+                    <input id="rulesCheckbox" type="checkbox">
+                    <span>Yukarıdaki metni okudum ve kabul ediyorum.</span>
+                </label>
+
+                <button id="confirmReservationButton" class="button primary-button full-width">
+                    Kabul Ediyorum
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ŞİFRE MODALI -->
+    <div id="passwordModal" class="modal">
+        <div class="modal-card small-modal">
+            <div class="modal-header">
+                <h3>Şifremi Unuttum</h3>
+                <button id="closePasswordModalButton" class="modal-close">×</button>
+            </div>
+
+            <div class="modal-body">
+                <p class="muted-text">Bu prototipte sıfırlama işlemi bilgi amaçlı gösterilir.</p>
+
+                <label for="resetStudentNo">Öğrenci numarası</label>
+                <input id="resetStudentNo" type="text" placeholder="Öğrenci numaranı yaz">
+
+                <button id="sendPasswordResetButton" class="button primary-button full-width">
+                    Sıfırlama Bağlantısı Gönder
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+
+    <script src="script.js"></script>
+</body>
+</html>
