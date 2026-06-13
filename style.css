@@ -2222,3 +2222,27 @@ select:focus {
         flex-direction: column;
     }
 }
+
+
+/* =========================================================
+   REZERVASYON DOĞRULAMA MESAJLARI
+   ========================================================= */
+.reservation-validation-message {
+    display: none;
+    margin: -4px 0 13px;
+    padding: 10px 12px;
+    border: 1px solid rgba(219, 74, 74, .20);
+    border-radius: 10px;
+    background: #fff4f4;
+    color: #a63439;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.5;
+}
+.reservation-validation-message.show { display: block; }
+.reservation-validation-message.success {
+    border-color: rgba(28, 103, 201, .18);
+    background: #eef5ff;
+    color: #174d99;
+}
+select option:disabled { color: #a3acba; background: #f1f3f6; }
