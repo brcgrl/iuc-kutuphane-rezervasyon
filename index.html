@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>İÜC Kütüphane Rezervasyon Sistemi</title>
-   <link rel="stylesheet" href="style.css?v=4">
+    <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <header class="site-header">
@@ -683,10 +683,10 @@
             </div>
 
             <div class="modal-body">
-                <p class="muted-text">Bu prototipte sıfırlama işlemi bilgi amaçlı gösterilir.</p>
+                <p class="muted-text">Şifre sıfırlama bağlantısı e-posta adresine gönderilir.</p>
 
-                <label for="resetStudentNo">Öğrenci numarası</label>
-                <input id="resetStudentNo" type="text" placeholder="Öğrenci numaranı yaz">
+                <label for="resetStudentNo">E-posta adresi</label>
+                <input id="resetStudentNo" type="email" placeholder="ornek@ogr.iuc.edu.tr">
 
                 <button id="sendPasswordResetButton" class="button primary-button full-width">
                     Sıfırlama Bağlantısı Gönder
@@ -697,6 +697,7 @@
 
     <div id="toast" class="toast"></div>
 
-    <script src="script.js?v=4"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="script.js?v=supabase-1"></script>
 </body>
 </html>

@@ -1,6 +1,22 @@
-const USERS_KEY = "iucModernUsers";
-const CURRENT_USER_KEY = "iucModernCurrentUser";
-const RESERVATIONS_KEY = "iucModernReservations";
+const SUPABASE_URL = "https://ovwutivagzrtrbzcblvu.supabase.co";
+const SUPABASE_PUBLISHABLE_KEY = "sb_publishable_Sqj15oCYgtrjX_zEuoqX2A_KCyeSNdA";
+const SITE_URL = "https://brcgrl.github.io/iuc-kutuphane-rezervasyon/";
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+    auth: {
+        persistSession: true,
+        autoRefreshToken: true,
+        detectSessionInUrl: true
+    }
+});
+
+let usersCache = [];
+let reservationsCache = [];
+let leaderboardCache = [];
+let occupancyCache = null;
+let currentAuthUser = null;
+let realtimeChannel = null;
+let reloadTimer = null;
+let penaltyProcessing = false;
 
 const LIBRARY_LOCATION = {
     latitude: 40.98623,
@@ -113,40 +129,145 @@ let locationWatchId = null;
 
 const $ = (id) => document.getElementById(id);
 
-function readStorage(key, fallback) {
-    try {
-        return JSON.parse(localStorage.getItem(key)) ?? fallback;
-    } catch {
-        return fallback;
+function profileToLocal(profile, email = "") {
+    if (!profile) {
+        return null;
     }
+
+    return {
+        id: profile.id,
+        name: profile.full_name || "Öğrenci",
+        studentNo: profile.student_no || "-",
+        email,
+        points: profile.total_points || 0,
+        monthlyPoints: profile.monthly_points || 0,
+        monthlyPointsMonth: profile.monthly_points_month || getCurrentMonthKey(),
+        streak: profile.streak || 0,
+        lastAttendanceDate: profile.last_attendance_date || null,
+        accessBlockedUntil: profile.access_blocked_until || null,
+        attendanceCount: profile.attendance_count || 0,
+        createdAt: profile.created_at
+    };
 }
 
-function writeStorage(key, value) {
-    localStorage.setItem(key, JSON.stringify(value));
+function reservationToLocal(reservation) {
+    const tableId = reservation.seat_code.split("-")[0];
+    const table = getTableById(tableId);
+
+    return {
+        id: reservation.id,
+        userId: reservation.user_id,
+        email: reservation.user_id === currentAuthUser?.id ? getCurrentUserEmail() : "__other__",
+        seatCode: reservation.seat_code,
+        tableName: table ? table.name : "Çalışma Alanı",
+        date: reservation.reservation_date,
+        time: reservation.time_slot,
+        status: reservation.status,
+        attendanceVerified: reservation.attendance_verified,
+        attendedAt: reservation.attended_at,
+        cancelledAt: reservation.cancelled_at,
+        createdAt: reservation.created_at
+    };
 }
 
 function getUsers() {
-    return readStorage(USERS_KEY, []);
+    return usersCache;
 }
 
 function saveUsers(users) {
-    writeStorage(USERS_KEY, users);
+    usersCache = users;
 }
 
 function getReservations() {
-    return readStorage(RESERVATIONS_KEY, []);
+    return reservationsCache;
 }
 
 function saveReservations(reservations) {
-    writeStorage(RESERVATIONS_KEY, reservations);
+    reservationsCache = reservations;
 }
 
 function getCurrentUserEmail() {
-    return localStorage.getItem(CURRENT_USER_KEY);
+    return currentAuthUser?.email || "";
 }
 
 function getCurrentUser() {
-    return getUsers().find((user) => user.email === getCurrentUserEmail()) || null;
+    return usersCache[0] || null;
+}
+
+async function loadPublicOccupancy() {
+    const { data, error } = await supabaseClient.rpc("get_public_occupancy_stats");
+
+    if (!error && data && data.length > 0) {
+        occupancyCache = data[0];
+    }
+}
+
+async function loadRemoteState() {
+    const { data: sessionData } = await supabaseClient.auth.getSession();
+    currentAuthUser = sessionData.session?.user || null;
+
+    await loadPublicOccupancy();
+
+    if (!currentAuthUser) {
+        usersCache = [];
+        reservationsCache = [];
+        leaderboardCache = [];
+        return;
+    }
+
+    const [profileResult, reservationsResult, leaderboardResult] = await Promise.all([
+        supabaseClient
+            .from("profiles")
+            .select("id, full_name, student_no, total_points, monthly_points, monthly_points_month, streak, last_attendance_date, access_blocked_until, attendance_count, created_at")
+            .eq("id", currentAuthUser.id)
+            .single(),
+        supabaseClient
+            .from("reservations")
+            .select("id, user_id, seat_code, reservation_date, time_slot, status, attendance_verified, attended_at, cancelled_at, created_at")
+            .order("created_at", { ascending: false }),
+        supabaseClient.rpc("get_monthly_leaderboard")
+    ]);
+
+    if (profileResult.error) {
+        throw profileResult.error;
+    }
+
+    usersCache = [profileToLocal(profileResult.data, currentAuthUser.email)];
+    reservationsCache = (reservationsResult.data || []).map(reservationToLocal);
+    leaderboardCache = leaderboardResult.data || [];
+}
+
+function scheduleRemoteReload() {
+    window.clearTimeout(reloadTimer);
+
+    reloadTimer = window.setTimeout(async () => {
+        try {
+            await loadRemoteState();
+            updateHeader();
+            renderLandingOccupancyTable();
+
+            if (getCurrentUser()) {
+                renderMetrics();
+                renderFloorPlan();
+                renderReservations();
+                renderProfile();
+            }
+        } catch (error) {
+            console.error(error);
+        }
+    }, 350);
+}
+
+function subscribeToRealtime() {
+    if (realtimeChannel) {
+        supabaseClient.removeChannel(realtimeChannel);
+    }
+
+    realtimeChannel = supabaseClient
+        .channel("library-live-updates")
+        .on("postgres_changes", { event: "*", schema: "public", table: "reservations" }, scheduleRemoteReload)
+        .on("postgres_changes", { event: "*", schema: "public", table: "profiles" }, scheduleRemoteReload)
+        .subscribe();
 }
 
 function getActiveReservations() {
@@ -320,135 +441,31 @@ function formatDateTime(dateValue) {
 }
 
 
-function repairErroneousPastBookingPenalties() {
-    const user = getCurrentUser();
-
-    if (!user) {
-        return;
-    }
-
-    const reservations = getReservations();
-    const users = getUsers();
-    const storedUser = users.find((item) => item.email === user.email);
-    let changed = false;
-    let pointsToRestore = 0;
-
-    reservations.forEach((reservation) => {
-        if (reservation.email !== user.email || reservation.status !== "missed") {
-            return;
-        }
-
-        const createdAt = reservation.createdAt ? new Date(reservation.createdAt) : null;
-        const sessionStart = getReservationStartDate(reservation);
-
-        if (createdAt && createdAt.getTime() >= sessionStart.getTime()) {
-            reservation.status = "invalid";
-            reservation.invalidReason = "Geçmiş saat için oluşturulan hatalı rezervasyon";
-            reservation.invalidatedAt = new Date().toISOString();
-
-            pointsToRestore += reservation.penaltyApplied ? (reservation.penaltyPoints || NO_SHOW_PENALTY_POINTS) : 0;
-            reservation.penaltyApplied = false;
-            changed = true;
-        }
-    });
-
-    if (!changed) {
-        return;
-    }
-
-    storedUser.points = (storedUser.points || 0) + pointsToRestore;
-    ensureMonthlyPoints(storedUser);
-    storedUser.monthlyPoints = (storedUser.monthlyPoints || 0) + pointsToRestore;
-
-    // Eski sürümde sadece hatalı geçmiş test rezervasyonundan kaynaklanan engeli temizle.
-    storedUser.accessBlockedUntil = null;
-
-    saveReservations(reservations);
-    saveUsers(users);
-
-    showToast("Geçmiş saate ait hatalı test rezervasyonu temizlendi. Ceza kaldırıldı.");
+async function repairErroneousPastBookingPenalties() {
+    return;
 }
 
-function applyOverdueNoShowPenalties() {
-    const user = getCurrentUser();
-
-    if (!user) {
+async function applyOverdueNoShowPenalties() {
+    if (!currentAuthUser || penaltyProcessing) {
         return;
     }
 
-    const reservations = getReservations();
-    const users = getUsers();
-    const storedUser = users.find((item) => item.email === user.email);
-    let changed = false;
-    let penaltyApplied = false;
+    penaltyProcessing = true;
 
-    reservations.forEach((reservation) => {
-        if (reservation.email !== user.email || reservation.status !== "active") {
+    try {
+        const { data, error } = await supabaseClient.rpc("process_no_show_penalties");
+
+        if (error) {
+            console.error(error);
             return;
         }
 
-        const sessionStart = getReservationStartDate(reservation);
-        const sessionEnd = getReservationEndDate(reservation);
-        const createdAt = reservation.createdAt ? new Date(reservation.createdAt) : null;
-
-        // Önceki sürümde yanlışlıkla geçmiş saat için oluşturulan test rezervasyonlarını
-        // cezalandırmadan geçersiz hale getir.
-        const createdAfterSessionStarted =
-            createdAt && createdAt.getTime() >= sessionStart.getTime();
-
-        if (createdAfterSessionStarted) {
-            reservation.status = "invalid";
-            reservation.invalidReason = "Geçmiş saat için oluşturulan hatalı rezervasyon";
-            reservation.invalidatedAt = new Date().toISOString();
-            changed = true;
-            return;
+        if ((data || 0) > 0) {
+            await loadRemoteState();
+            showToast("Katılımı doğrulanmayan seanslar için ceza uygulandı.");
         }
-
-        const overdue =
-            !reservation.attendanceVerified &&
-            sessionEnd.getTime() < Date.now();
-
-        if (!overdue) {
-            return;
-        }
-
-        reservation.status = "missed";
-        reservation.penaltyApplied = true;
-        reservation.penaltyPoints = NO_SHOW_PENALTY_POINTS;
-        reservation.penaltyAppliedAt = new Date().toISOString();
-
-        storedUser.points = Math.max(0, (storedUser.points || 0) - NO_SHOW_PENALTY_POINTS);
-
-        ensureMonthlyPoints(storedUser);
-        storedUser.monthlyPoints = Math.max(
-            0,
-            (storedUser.monthlyPoints || 0) - NO_SHOW_PENALTY_POINTS
-        );
-
-        storedUser.streak = 0;
-
-        const blockedUntil = new Date();
-        blockedUntil.setDate(blockedUntil.getDate() + ACCESS_BLOCK_DAYS);
-
-        const existingBlockedUntil = storedUser.accessBlockedUntil
-            ? new Date(storedUser.accessBlockedUntil)
-            : null;
-
-        if (!existingBlockedUntil || existingBlockedUntil < blockedUntil) {
-            storedUser.accessBlockedUntil = blockedUntil.toISOString();
-        }
-
-        changed = true;
-        penaltyApplied = true;
-    });
-
-    if (changed) {
-        saveReservations(reservations);
-        saveUsers(users);
-    }
-
-    if (penaltyApplied) {
-        showToast("Katılımı doğrulanmayan seans için ceza uygulandı: -10 puan ve 2 gün erişim engeli.");
+    } finally {
+        penaltyProcessing = false;
     }
 }
 
@@ -533,19 +550,22 @@ function goToReservationFlow() {
     enterDashboard();
 }
 
-function enterDashboard() {
-    const user = getCurrentUser();
-
-    if (!user) {
+async function enterDashboard() {
+    if (!currentAuthUser) {
         showView("authView");
         return;
     }
 
+    try {
+        await applyOverdueNoShowPenalties();
+        await loadRemoteState();
+    } catch (error) {
+        console.error(error);
+        showToast("Veriler alınırken bir sorun oluştu.");
+    }
+
     updateHeader();
     showView("dashboardView");
-
-    repairErroneousPastBookingPenalties();
-    applyOverdueNoShowPenalties();
     showDashboardPanel("libraryPanel");
 
     renderLandingOccupancyTable();
@@ -571,13 +591,17 @@ function showRegisterTab() {
     $("showLoginTab").classList.remove("active");
 }
 
-function logout() {
+async function logout() {
     if (locationWatchId !== null && navigator.geolocation) {
         navigator.geolocation.clearWatch(locationWatchId);
         locationWatchId = null;
     }
 
-    localStorage.removeItem(CURRENT_USER_KEY);
+    await supabaseClient.auth.signOut();
+    currentAuthUser = null;
+    usersCache = [];
+    reservationsCache = [];
+    leaderboardCache = [];
     updateHeader();
     showView("landingView");
     showToast("Çıkış yapıldı.");
@@ -606,34 +630,47 @@ $("closePasswordModalButton").addEventListener("click", () => {
     $("passwordModal").classList.remove("show");
 });
 
-$("sendPasswordResetButton").addEventListener("click", () => {
-    showToast("Şifre sıfırlama bağlantısı gönderildi.");
+$("sendPasswordResetButton").addEventListener("click", async () => {
+    const email = $("resetStudentNo").value.trim().toLowerCase();
+
+    if (!email) {
+        showToast("E-posta adresini yazmalısın.");
+        return;
+    }
+
+    const { error } = await supabaseClient.auth.resetPasswordForEmail(email, {
+        redirectTo: SITE_URL
+    });
+
+    if (error) {
+        showToast("Şifre sıfırlama bağlantısı gönderilemedi.");
+        return;
+    }
+
+    showToast("Şifre sıfırlama bağlantısı e-posta adresine gönderildi.");
     $("passwordModal").classList.remove("show");
 });
 
-$("loginForm").addEventListener("submit", (event) => {
+$("loginForm").addEventListener("submit", async (event) => {
     event.preventDefault();
 
     const email = $("loginEmail").value.trim().toLowerCase();
     const password = $("loginPassword").value;
 
-    const user = getUsers().find((item) => {
-        return item.email === email && item.password === password;
-    });
+    const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
 
-    if (!user) {
-        showToast("E-posta veya şifre yanlış.");
+    if (error) {
+        showToast("E-posta veya şifre yanlış. E-posta doğrulaması açıksa gelen kutunu da kontrol et.");
         return;
     }
 
-    localStorage.setItem(CURRENT_USER_KEY, email);
+    await loadRemoteState();
     $("loginForm").reset();
-
-    enterDashboard();
+    await enterDashboard();
     showToast("Giriş yapıldı.");
 });
 
-$("registerForm").addEventListener("submit", (event) => {
+$("registerForm").addEventListener("submit", async (event) => {
     event.preventDefault();
 
     const name = $("registerName").value.trim();
@@ -641,30 +678,35 @@ $("registerForm").addEventListener("submit", (event) => {
     const email = $("registerEmail").value.trim().toLowerCase();
     const password = $("registerPassword").value;
 
-    const users = getUsers();
+    const { data, error } = await supabaseClient.auth.signUp({
+        email,
+        password,
+        options: {
+            emailRedirectTo: SITE_URL,
+            data: {
+                full_name: name,
+                student_no: studentNo
+            }
+        }
+    });
 
-    if (users.some((item) => item.email === email)) {
-        showToast("Bu e-posta adresiyle daha önce hesap oluşturulmuş.");
+    if (error) {
+        showToast(error.message.includes("already")
+            ? "Bu e-posta adresiyle daha önce hesap oluşturulmuş."
+            : `Hesap oluşturulamadı: ${error.message}`);
         return;
     }
 
-    users.push({
-        name,
-        studentNo,
-        email,
-        password,
-        points: 0,
-        attendanceCount: 0,
-        monthlyPoints: 0,
-        monthlyPointsMonth: getCurrentMonthKey(),
-        createdAt: new Date().toISOString()
-    });
-
-    saveUsers(users);
-    localStorage.setItem(CURRENT_USER_KEY, email);
     $("registerForm").reset();
 
-    enterDashboard();
+    if (!data.session) {
+        showLoginTab();
+        showToast("Hesabın oluşturuldu. E-posta adresine gelen doğrulama bağlantısına basmalısın.");
+        return;
+    }
+
+    await loadRemoteState();
+    await enterDashboard();
     showToast("Hesabın oluşturuldu.");
 });
 
@@ -696,7 +738,7 @@ function getSeatReservationSet() {
     return new Set(
         getReservations()
             .filter((reservation) => {
-                return reservation.status === "active" &&
+                return (reservation.status === "active" || reservation.status === "attended") &&
                     reservation.date === $("reservationDate").value &&
                     reservation.time === $("reservationTime").value;
             })
@@ -710,17 +752,23 @@ function isSeatOccupied(seatCode) {
 
 function calculateSeatSummary() {
     const totalSeats = TABLES.reduce((sum, table) => sum + table.seats, 0);
-    const activeReservations = getReservations().filter((reservation) => reservation.status === "active");
+
+    if (occupancyCache) {
+        const occupiedSeats = Number(occupancyCache.occupied_seats || 0) + FIXED_OCCUPIED_SEATS.size;
+        const availableSeats = Math.max(0, totalSeats - occupiedSeats);
+        const occupancyRate = totalSeats === 0 ? 0 : Math.round((occupiedSeats / totalSeats) * 100);
+
+        return { totalSeats, occupiedSeats, availableSeats, occupancyRate };
+    }
+
+    const activeReservations = getReservations().filter((reservation) => {
+        return reservation.status === "active" || reservation.status === "attended";
+    });
     const occupiedSeats = FIXED_OCCUPIED_SEATS.size + activeReservations.length;
     const availableSeats = Math.max(0, totalSeats - occupiedSeats);
     const occupancyRate = totalSeats === 0 ? 0 : Math.round((occupiedSeats / totalSeats) * 100);
 
-    return {
-        totalSeats,
-        occupiedSeats,
-        availableSeats,
-        occupancyRate
-    };
+    return { totalSeats, occupiedSeats, availableSeats, occupancyRate };
 }
 
 function renderLandingOccupancyTable() {
@@ -1003,20 +1051,18 @@ $("rulesModal").addEventListener("click", (event) => {
     }
 });
 
-$("confirmReservationButton").addEventListener("click", () => {
+$("confirmReservationButton").addEventListener("click", async () => {
     if (!$("rulesCheckbox").checked) {
         showToast("Kuralları kabul etmelisin.");
         return;
     }
 
-    applyOverdueNoShowPenalties();
     const validationError = getReservationValidationError();
 
     if (validationError) {
         showToast(validationError);
         showReservationValidationMessage(validationError);
         $("rulesModal").classList.remove("show");
-        renderReservationAccessBanner();
         return;
     }
 
@@ -1025,27 +1071,32 @@ $("confirmReservationButton").addEventListener("click", () => {
         return;
     }
 
-    const tableId = selectedSeatCode.split("-")[0];
-    const table = getTableById(tableId);
-    const reservations = getReservations();
-
-    reservations.push({
-        id: `R-${Date.now()}`,
-        email: getCurrentUserEmail(),
-        seatCode: selectedSeatCode,
-        tableName: table.name,
-        date: $("reservationDate").value,
-        time: $("reservationTime").value,
-        status: "active",
-        attendanceVerified: false,
-        createdAt: new Date().toISOString()
+    const { error } = await supabaseClient.from("reservations").insert({
+        user_id: currentAuthUser.id,
+        seat_code: selectedSeatCode,
+        reservation_date: $("reservationDate").value,
+        time_slot: $("reservationTime").value
     });
 
-    saveReservations(reservations);
+    if (error) {
+        const message = error.message.includes("unique_active_user_session")
+            ? "Bu saat aralığı için zaten bir koltuk ayırdın. Aynı seansa ikinci bir koltuk seçemezsin."
+            : error.message.includes("unique_active_seat_session")
+                ? "Bu koltuk az önce başka bir kullanıcı tarafından rezerve edildi. Başka bir koltuk seçmelisin."
+                : error.message;
+
+        showToast(message);
+        showReservationValidationMessage(message);
+        $("rulesModal").classList.remove("show");
+        await loadRemoteState();
+        renderFloorPlan();
+        return;
+    }
 
     selectedSeatCode = null;
     $("rulesModal").classList.remove("show");
 
+    await loadRemoteState();
     refreshAvailableTimeOptions();
     updateSelectedSeatArea();
     showReservationValidationMessage("");
@@ -1168,25 +1219,23 @@ function renderReservations() {
     renderReservationAccessBanner();
     updateSelectedSeatArea();
 }
-function cancelReservation(reservationId) {
+async function cancelReservation(reservationId) {
     const confirmed = window.confirm("Rezervasyonunu iptal etmek istediğine emin misin?");
 
     if (!confirmed) {
         return;
     }
 
-    const reservations = getReservations();
-    const reservation = reservations.find((item) => item.id === reservationId);
+    const { error } = await supabaseClient.rpc("cancel_reservation", {
+        p_reservation_id: reservationId
+    });
 
-    if (!reservation) {
+    if (error) {
+        showToast(`Rezervasyon iptal edilemedi: ${error.message}`);
         return;
     }
 
-    reservation.status = "cancelled";
-    reservation.cancelledAt = new Date().toISOString();
-
-    saveReservations(reservations);
-
+    await loadRemoteState();
     refreshAvailableTimeOptions();
     renderReservations();
     renderFloorPlan();
@@ -1221,9 +1270,7 @@ function getSelectedAttendanceReservation() {
     return getActiveReservations().find((reservation) => reservation.id === reservationId) || null;
 }
 
-function verifyAttendance(distanceMeters) {
-    applyOverdueNoShowPenalties();
-
+async function verifyAttendance(distanceMeters, latitude, longitude) {
     const activeReservation = getSelectedAttendanceReservation();
 
     if (!activeReservation) {
@@ -1231,51 +1278,24 @@ function verifyAttendance(distanceMeters) {
         return;
     }
 
-    if (activeReservation.attendanceVerified) {
-        showToast("Bu seans için katılımın daha önce doğrulandı.");
+    const { error } = await supabaseClient.rpc("verify_attendance", {
+        p_reservation_id: activeReservation.id,
+        p_latitude: latitude,
+        p_longitude: longitude
+    });
+
+    if (error) {
+        showToast(`Katılım doğrulanamadı: ${error.message}`);
         return;
     }
 
-    const reservations = getReservations();
-    const reservation = reservations.find((item) => item.id === activeReservation.id);
-
-    reservation.attendanceVerified = true;
-    reservation.attendedAt = new Date().toISOString();
-    reservation.distanceMeters = Math.round(distanceMeters);
-
-    saveReservations(reservations);
-
-    const users = getUsers();
-    const user = users.find((item) => item.email === reservation.email);
-
-    user.points = (user.points || 0) + 10;
-    user.attendanceCount = (user.attendanceCount || 0) + 1;
-
-    ensureMonthlyPoints(user);
-    user.monthlyPoints = (user.monthlyPoints || 0) + 10;
-
-    const today = new Date().toISOString().split("T")[0];
-    const yesterdayDate = new Date();
-    yesterdayDate.setDate(yesterdayDate.getDate() - 1);
-    const yesterday = yesterdayDate.toISOString().split("T")[0];
-
-    if (user.lastAttendanceDate !== today) {
-        if (user.lastAttendanceDate === yesterday) {
-            user.streak = (user.streak || 0) + 1;
-        } else {
-            user.streak = 1;
-        }
-
-        user.lastAttendanceDate = today;
-    }
-
-    saveUsers(users);
-
+    await loadRemoteState();
     $("locationStatusText").textContent =
         "Katılımın doğrulandı. Kütüphaneye hoş geldin! (+10 puan)";
 
     renderReservations();
     renderProfile();
+    renderLandingOccupancyTable();
     showToast("Katılım doğrulandı. 10 puan kazandın.");
 }
 
@@ -1304,7 +1324,7 @@ function startLocationTracking() {
             );
 
             if (distanceMeters <= LIBRARY_LOCATION.radiusMeters) {
-                verifyAttendance(distanceMeters);
+                verifyAttendance(distanceMeters, position.coords.latitude, position.coords.longitude);
             } else {
                 $("locationStatusText").textContent =
                     `Şu anda kütüphane alanının yaklaşık ${Math.round(distanceMeters)} metre dışındasın.`;
@@ -1324,7 +1344,7 @@ function startLocationTracking() {
 $("startLocationButton").addEventListener("click", startLocationTracking);
 
 $("demoLocationButton").addEventListener("click", () => {
-    verifyAttendance(12);
+    verifyAttendance(12, LIBRARY_LOCATION.latitude, LIBRARY_LOCATION.longitude);
 });
 
 function getCurrentLevel(points) {
@@ -1360,40 +1380,33 @@ function getNextRank(points) {
 }
 
 function renderMonthlyLeaderboard(user) {
-    const monthlyPoints = ensureMonthlyPoints(user);
-
-    const leaderboard = [
-        ...DEMO_MONTHLY_LEADERBOARD.map((item) => ({
-            ...item,
-            isCurrentUser: false
-        })),
-        {
+    const leaderboard = leaderboardCache.length > 0
+        ? leaderboardCache.map((item) => ({
+            name: item.display_name,
+            monthlyPoints: Number(item.monthly_points || 0),
+            isCurrentUser: Boolean(item.is_current_user),
+            position: Number(item.rank_number)
+        }))
+        : [{
             name: user.name,
-            monthlyPoints,
-            isCurrentUser: true
-        }
-    ].sort((a, b) => {
-        if (b.monthlyPoints !== a.monthlyPoints) {
-            return b.monthlyPoints - a.monthlyPoints;
-        }
+            monthlyPoints: Number(user.monthlyPoints || 0),
+            isCurrentUser: true,
+            position: 1
+        }];
 
-        return a.name.localeCompare(b.name, "tr");
-    });
+    const currentUser = leaderboard.find((item) => item.isCurrentUser) || leaderboard[0];
+    const thirdPlacePoints = leaderboard[2]?.monthlyPoints || 0;
+    const pointsToTopThree = Math.max(0, thirdPlacePoints - currentUser.monthlyPoints + (currentUser.position > 3 ? 10 : 0));
 
-    const currentUserIndex = leaderboard.findIndex((item) => item.isCurrentUser);
-    const currentUserRank = currentUserIndex + 1;
-    const thirdPlacePoints = leaderboard[2] ? leaderboard[2].monthlyPoints : 0;
-    const pointsToTopThree = Math.max(0, thirdPlacePoints - monthlyPoints + (currentUserRank > 3 ? 10 : 0));
-
-    $("monthlyRankText").textContent = `#${currentUserRank}`;
-    $("monthlyPointsText").textContent = `${monthlyPoints} XP`;
+    $("monthlyRankText").textContent = `#${currentUser.position}`;
+    $("monthlyPointsText").textContent = `${currentUser.monthlyPoints} XP`;
     $("leaderboardParticipantCount").textContent = leaderboard.length;
-    $("pointsToTopThree").textContent = currentUserRank <= 3 ? "İlk 3'tesin" : `${pointsToTopThree} XP`;
+    $("pointsToTopThree").textContent = currentUser.position <= 3 ? "İlk 3'tesin" : `${pointsToTopThree} XP`;
 
-    $("leaderboardTable").innerHTML = leaderboard.map((item, index) => `
+    $("leaderboardTable").innerHTML = leaderboard.map((item) => `
         <div class="leaderboard-row ${item.isCurrentUser ? "current-user" : ""}">
             <div class="leaderboard-position">
-                ${index < 3 ? ["🥇", "🥈", "🥉"][index] : `#${index + 1}`}
+                ${item.position <= 3 ? ["🥇", "🥈", "🥉"][item.position - 1] : `#${item.position}`}
             </div>
 
             <div class="leaderboard-person">
@@ -1558,10 +1571,25 @@ function renderProfile() {
 const today = new Date().toISOString().split("T")[0];
 $("reservationDate").min = today;
 
-refreshAvailableTimeOptions();
-updateHeader();
-renderLandingOccupancyTable();
+async function initializeApp() {
+    try {
+        await loadRemoteState();
+        subscribeToRealtime();
+        refreshAvailableTimeOptions();
+        updateHeader();
+        renderLandingOccupancyTable();
 
-if (getCurrentUser()) {
-    $("signedInActions").classList.remove("hidden");
+        if (currentAuthUser) {
+            $("signedInActions").classList.remove("hidden");
+        }
+    } catch (error) {
+        console.error(error);
+        showToast("Veri tabanı bağlantısı kurulamadı.");
+    }
 }
+
+supabaseClient.auth.onAuthStateChange(() => {
+    scheduleRemoteReload();
+});
+
+initializeApp();
