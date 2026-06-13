@@ -194,13 +194,28 @@ function getDailySessionCount(date = $("reservationDate").value || getTodayStrin
 }
 
 function getSessionStartDate(dateValue, timeRange) {
-    if (!dateValue || !timeRange) return null;
+    if (!dateValue || !timeRange) {
+        return null;
+    }
+
     const startTime = timeRange.split(" - ")[0];
+
     return new Date(`${dateValue}T${startTime}:00`);
+}
+
+function getSessionEndDate(dateValue, timeRange) {
+    if (!dateValue || !timeRange) {
+        return null;
+    }
+
+    const endTime = timeRange.split(" - ")[1];
+
+    return new Date(`${dateValue}T${endTime}:00`);
 }
 
 function isPastSession(dateValue, timeRange) {
     const sessionStart = getSessionStartDate(dateValue, timeRange);
+
     return Boolean(sessionStart && sessionStart.getTime() <= Date.now());
 }
 
@@ -209,7 +224,8 @@ function hasSameSessionReservation(dateValue, timeRange, email = getCurrentUserE
         return reservation.email === email &&
             reservation.date === dateValue &&
             reservation.time === timeRange &&
-            reservation.status !== "cancelled";
+            reservation.status !== "cancelled" &&
+            reservation.status !== "invalid";
     });
 }
 
@@ -217,38 +233,72 @@ function getReservationValidationError() {
     const selectedDate = $("reservationDate").value;
     const selectedTime = $("reservationTime").value;
 
-    if (!selectedDate) return "Önce rezervasyon tarihini seçmelisin.";
-    if (!selectedTime) return "Saat aralığını seçmelisin.";
-    if (isPastSession(selectedDate, selectedTime)) return "Geçmiş bir saat aralığı için rezervasyon oluşturamazsın.";
-    if (hasSameSessionReservation(selectedDate, selectedTime)) return "Aynı gün ve aynı saat aralığı için yalnızca bir koltuk rezerve edebilirsin.";
-    if (getDailySessionCount(selectedDate) >= MAX_DAILY_SESSIONS) return "Aynı gün içerisinde en fazla 4 seans rezerve edebilirsin.";
-    if (isUserBlocked()) return "Ceza süren devam ettiği için yeni rezervasyon oluşturamazsın.";
+    if (!selectedDate) {
+        return "Önce rezervasyon tarihini seçmelisin.";
+    }
+
+    if (!selectedTime) {
+        return "Önce saat aralığını seçmelisin.";
+    }
+
+    if (selectedDate < getTodayString()) {
+        return "Geçmiş bir tarihe rezervasyon oluşturamazsın.";
+    }
+
+    if (isPastSession(selectedDate, selectedTime)) {
+        return "Bu saat aralığı geçtiği için rezervasyon oluşturamazsın. Lütfen ileri bir saat seç.";
+    }
+
+    if (hasSameSessionReservation(selectedDate, selectedTime)) {
+        return "Bu saat aralığı için zaten bir koltuk ayırdın. Aynı seansa ikinci bir koltuk seçemezsin.";
+    }
+
+    if (getDailySessionCount(selectedDate) >= MAX_DAILY_SESSIONS) {
+        return "Aynı gün içerisinde en fazla 4 seans rezerve edebilirsin.";
+    }
+
+    if (isUserBlocked()) {
+        return "Ceza süren devam ettiği için yeni rezervasyon oluşturamazsın.";
+    }
+
     return "";
 }
 
 function showReservationValidationMessage(message = "", success = false) {
-    const area = $("reservationValidationMessage");
-    if (!area) return;
-    area.textContent = message;
-    area.classList.toggle("show", Boolean(message));
-    area.classList.toggle("success", Boolean(message && success));
+    const messageArea = $("reservationValidationMessage");
+
+    if (!messageArea) {
+        return;
+    }
+
+    messageArea.textContent = message;
+    messageArea.classList.toggle("show", Boolean(message));
+    messageArea.classList.toggle("success", Boolean(message && success));
 }
 
 function refreshAvailableTimeOptions() {
     const selectedDate = $("reservationDate").value;
-    const select = $("reservationTime");
-    const currentValue = select.value;
+    const timeSelect = $("reservationTime");
+    const currentValue = timeSelect.value;
 
-    Array.from(select.options).forEach((option) => {
-        if (!option.value) return;
-        const blockedByPast = selectedDate && isPastSession(selectedDate, option.value);
+    Array.from(timeSelect.options).forEach((option) => {
+        if (!option.value) {
+            return;
+        }
+
+        const blockedByPastDate = selectedDate && selectedDate < getTodayString();
+        const blockedByPastTime = selectedDate && isPastSession(selectedDate, option.value);
         const blockedByDuplicate = selectedDate && hasSameSessionReservation(selectedDate, option.value);
-        option.disabled = Boolean(blockedByPast || blockedByDuplicate);
+
+        option.disabled = Boolean(blockedByPastDate || blockedByPastTime || blockedByDuplicate);
     });
 
-    const selectedOption = Array.from(select.options).find((option) => option.value === currentValue);
+    const selectedOption = Array.from(timeSelect.options).find((option) => {
+        return option.value === currentValue;
+    });
+
     if (selectedOption && selectedOption.disabled) {
-        select.value = "";
+        timeSelect.value = "";
         selectedSeatCode = null;
     }
 }
@@ -269,6 +319,56 @@ function formatDateTime(dateValue) {
     }).format(dateValue);
 }
 
+
+function repairErroneousPastBookingPenalties() {
+    const user = getCurrentUser();
+
+    if (!user) {
+        return;
+    }
+
+    const reservations = getReservations();
+    const users = getUsers();
+    const storedUser = users.find((item) => item.email === user.email);
+    let changed = false;
+    let pointsToRestore = 0;
+
+    reservations.forEach((reservation) => {
+        if (reservation.email !== user.email || reservation.status !== "missed") {
+            return;
+        }
+
+        const createdAt = reservation.createdAt ? new Date(reservation.createdAt) : null;
+        const sessionStart = getReservationStartDate(reservation);
+
+        if (createdAt && createdAt.getTime() >= sessionStart.getTime()) {
+            reservation.status = "invalid";
+            reservation.invalidReason = "Geçmiş saat için oluşturulan hatalı rezervasyon";
+            reservation.invalidatedAt = new Date().toISOString();
+
+            pointsToRestore += reservation.penaltyApplied ? (reservation.penaltyPoints || NO_SHOW_PENALTY_POINTS) : 0;
+            reservation.penaltyApplied = false;
+            changed = true;
+        }
+    });
+
+    if (!changed) {
+        return;
+    }
+
+    storedUser.points = (storedUser.points || 0) + pointsToRestore;
+    ensureMonthlyPoints(storedUser);
+    storedUser.monthlyPoints = (storedUser.monthlyPoints || 0) + pointsToRestore;
+
+    // Eski sürümde sadece hatalı geçmiş test rezervasyonundan kaynaklanan engeli temizle.
+    storedUser.accessBlockedUntil = null;
+
+    saveReservations(reservations);
+    saveUsers(users);
+
+    showToast("Geçmiş saate ait hatalı test rezervasyonu temizlendi. Ceza kaldırıldı.");
+}
+
 function applyOverdueNoShowPenalties() {
     const user = getCurrentUser();
 
@@ -280,13 +380,33 @@ function applyOverdueNoShowPenalties() {
     const users = getUsers();
     const storedUser = users.find((item) => item.email === user.email);
     let changed = false;
+    let penaltyApplied = false;
 
     reservations.forEach((reservation) => {
+        if (reservation.email !== user.email || reservation.status !== "active") {
+            return;
+        }
+
+        const sessionStart = getReservationStartDate(reservation);
+        const sessionEnd = getReservationEndDate(reservation);
+        const createdAt = reservation.createdAt ? new Date(reservation.createdAt) : null;
+
+        // Önceki sürümde yanlışlıkla geçmiş saat için oluşturulan test rezervasyonlarını
+        // cezalandırmadan geçersiz hale getir.
+        const createdAfterSessionStarted =
+            createdAt && createdAt.getTime() >= sessionStart.getTime();
+
+        if (createdAfterSessionStarted) {
+            reservation.status = "invalid";
+            reservation.invalidReason = "Geçmiş saat için oluşturulan hatalı rezervasyon";
+            reservation.invalidatedAt = new Date().toISOString();
+            changed = true;
+            return;
+        }
+
         const overdue =
-            reservation.email === user.email &&
-            reservation.status === "active" &&
             !reservation.attendanceVerified &&
-            getReservationEndDate(reservation).getTime() < Date.now();
+            sessionEnd.getTime() < Date.now();
 
         if (!overdue) {
             return;
@@ -319,11 +439,15 @@ function applyOverdueNoShowPenalties() {
         }
 
         changed = true;
+        penaltyApplied = true;
     });
 
     if (changed) {
         saveReservations(reservations);
         saveUsers(users);
+    }
+
+    if (penaltyApplied) {
         showToast("Katılımı doğrulanmayan seans için ceza uygulandı: -10 puan ve 2 gün erişim engeli.");
     }
 }
@@ -420,6 +544,7 @@ function enterDashboard() {
     updateHeader();
     showView("dashboardView");
 
+    repairErroneousPastBookingPenalties();
     applyOverdueNoShowPenalties();
     showDashboardPanel("libraryPanel");
 
@@ -749,9 +874,13 @@ function updateSelectedSeatArea() {
     $("selectedSeatText").textContent = selectedSeatCode || "Henüz seçilmedi";
 
     refreshAvailableTimeOptions();
+
     const validationError = getReservationValidationError();
 
-    $("createReservationButton").disabled = !(selectedSeatCode && !validationError);
+    $("createReservationButton").disabled = !(
+        selectedSeatCode &&
+        !validationError
+    );
 
     if (validationError && ($("reservationDate").value || $("reservationTime").value)) {
         showReservationValidationMessage(validationError);
@@ -805,8 +934,13 @@ $("reservationDate").addEventListener("change", () => {
     selectedSeatCode = null;
 
     if ($("reservationDate").value < getTodayString()) {
-        $("reservationDate").value = getTodayString();
-        showToast("Geçmiş bir tarih için rezervasyon oluşturamazsın.");
+        $("reservationDate").value = "";
+        $("reservationTime").value = "";
+        showReservationValidationMessage("Geçmiş bir tarihe rezervasyon oluşturamazsın.");
+        showToast("Geçmiş bir tarihe rezervasyon oluşturamazsın.");
+        refreshAvailableTimeOptions();
+        renderFloorPlan();
+        return;
     }
 
     refreshAvailableTimeOptions();
@@ -816,8 +950,30 @@ $("reservationDate").addEventListener("change", () => {
 
 $("reservationTime").addEventListener("change", () => {
     selectedSeatCode = null;
-    const validationError = getReservationValidationError();
-    if (validationError) showReservationValidationMessage(validationError);
+
+    const selectedDate = $("reservationDate").value;
+    const selectedTime = $("reservationTime").value;
+
+    if (selectedDate && selectedTime && isPastSession(selectedDate, selectedTime)) {
+        $("reservationTime").value = "";
+        showReservationValidationMessage(
+            "Bu saat aralığı geçtiği için rezervasyon oluşturamazsın. Lütfen ileri bir saat seç."
+        );
+        showToast("Geçmiş bir saate rezervasyon oluşturamazsın.");
+        renderFloorPlan();
+        return;
+    }
+
+    if (selectedDate && selectedTime && hasSameSessionReservation(selectedDate, selectedTime)) {
+        $("reservationTime").value = "";
+        showReservationValidationMessage(
+            "Bu saat aralığı için zaten bir koltuk ayırdın. Aynı seansa ikinci bir koltuk seçemezsin."
+        );
+        showToast("Aynı saate ikinci bir koltuk alamazsın.");
+        renderFloorPlan();
+        return;
+    }
+
     updateSelectedSeatArea();
     renderFloorPlan();
 });
@@ -910,6 +1066,10 @@ function createStatusChip(reservation) {
 
     if (reservation.status === "missed") {
         return '<span class="status-chip missed">Katılmadı · -10 Puan</span>';
+    }
+
+    if (reservation.status === "invalid") {
+        return '<span class="status-chip cancelled">Geçersiz · Ceza Uygulanmadı</span>';
     }
 
     if (reservation.attendanceVerified) {
